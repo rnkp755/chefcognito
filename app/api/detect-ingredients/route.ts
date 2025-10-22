@@ -1,54 +1,57 @@
-import type { NextRequest } from "next/server"
-import { auth } from "@clerk/nextjs/server"
-import { GoogleGenerativeAI } from "@google/generative-ai"
+import type { NextRequest } from "next/server";
+import { auth } from "@clerk/nextjs/server";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 // Initialize Gemini AI
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
 export async function POST(request: NextRequest) {
-  const { userId } = await auth()
-  if (!userId) {
-    return new Response("Unauthorized", { status: 401 })
-  }
+	const { userId } = await auth();
+	if (!userId) {
+		return new Response("Unauthorized", { status: 401 });
+	}
 
-  const formData = await request.formData()
-  const image = formData.get("image") as File
+	const formData = await request.formData();
+	const image = formData.get("image") as File;
 
-  if (!image) {
-    return new Response("No image provided", { status: 400 })
-  }
+	if (!image) {
+		return new Response("No image provided", { status: 400 });
+	}
 
-  // Set up Server-Sent Events for ingredient detection
-  const encoder = new TextEncoder()
-  const stream = new ReadableStream({
-    start(controller) {
-      const sendEvent = (step: string, progress: number) => {
-        const data = JSON.stringify({ step, progress })
-        controller.enqueue(encoder.encode(`data: ${data}\n\n`))
-      }
+	// Set up Server-Sent Events for ingredient detection
+	const encoder = new TextEncoder();
+	const stream = new ReadableStream({
+		start(controller) {
+			const sendEvent = (step: string, progress: number) => {
+				const data = JSON.stringify({ step, progress });
+				controller.enqueue(encoder.encode(`data: ${data}\n\n`));
+			};
 
-      const processImage = async () => {
-        try {
-          sendEvent("Preparing image for analysis...", 10)
+			const processImage = async () => {
+				try {
+					sendEvent("Preparing image for analysis...", 10);
 
-          // Convert image to base64
-          const bytes = await image.arrayBuffer()
-          const buffer = Buffer.from(bytes)
-          const base64Image = buffer.toString("base64")
+					// Convert image to base64
+					const bytes = await image.arrayBuffer();
+					const buffer = Buffer.from(bytes);
+					const base64Image = buffer.toString("base64");
 
-          sendEvent("Uploading to AI service...", 30)
+					sendEvent("Uploading to AI service...", 30);
 
-          // Get current time for meal context
-          const currentHour = new Date().getHours()
-          let mealType = "snack"
-          if (currentHour >= 6 && currentHour < 11) mealType = "breakfast"
-          else if (currentHour >= 11 && currentHour < 16) mealType = "lunch"
-          else if (currentHour >= 16 && currentHour < 22) mealType = "dinner"
+					// Get current time for meal context
+					const currentHour = new Date().getHours();
+					let mealType = "snack";
+					if (currentHour >= 6 && currentHour < 11)
+						mealType = "breakfast";
+					else if (currentHour >= 11 && currentHour < 16)
+						mealType = "lunch";
+					else if (currentHour >= 16 && currentHour < 22)
+						mealType = "dinner";
 
-          sendEvent("Analyzing ingredients with AI...", 60)
+					sendEvent("Analyzing ingredients with AI...", 60);
 
-          // Prepare Gemini prompt
-          const prompt = `
+					// Prepare Gemini prompt
+					const prompt = `
 You are an expert food ingredient detection AI. Analyze this image and identify all visible food ingredients with their estimated quantities.
 
 Current context:
@@ -74,85 +77,94 @@ Guidelines:
 - Focus on ingredients that can be used for cooking
 
 Return only the JSON response, no additional text.
-`
+`;
 
-          sendEvent("Processing AI response...", 80)
+					sendEvent("Processing AI response...", 80);
 
-          // Call Gemini API
-          const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" })
+					// Call Gemini API
+					const model = genAI.getGenerativeModel({
+						model: "gemini-2.5-flash",
+					});
 
-          const result = await model.generateContent([
-            prompt,
-            {
-              inlineData: {
-                data: base64Image,
-                mimeType: image.type,
-              },
-            },
-          ])
+					const result = await model.generateContent([
+						prompt,
+						{
+							inlineData: {
+								data: base64Image,
+								mimeType: image.type,
+							},
+						},
+					]);
 
-          const response = await result.response
-          const text = response.text()
+					const response = await result.response;
+					const text = response.text();
 
-          sendEvent("Finalizing results...", 95)
+					sendEvent("Finalizing results...", 95);
 
-          // Parse JSON response
-          let parsedResponse
-          try {
-            // Clean the response text to extract JSON
-            const jsonMatch = text.match(/\{[\s\S]*\}/)
-            if (jsonMatch) {
-              parsedResponse = JSON.parse(jsonMatch[0])
-            } else {
-              throw new Error("No JSON found in response")
-            }
-          } catch (parseError) {
-            console.error("Error parsing Gemini response:", parseError)
-            console.error("Raw response:", text)
+					// Parse JSON response
+					let parsedResponse;
+					try {
+						// Clean the response text to extract JSON
+						const jsonMatch = text.match(/\{[\s\S]*\}/);
+						if (jsonMatch) {
+							parsedResponse = JSON.parse(jsonMatch[0]);
+						} else {
+							throw new Error("No JSON found in response");
+						}
+					} catch (parseError) {
+						console.error(
+							"Error parsing Gemini response:",
+							parseError
+						);
+						console.error("Raw response:", text);
 
-            // Fallback response
-            parsedResponse = {
-              ingredients: [
-                {
-                  name: "mixed ingredients",
-                  quantity: "various amounts",
-                  confidence: 0.5,
-                },
-              ],
-            }
-          }
+						// Fallback response
+						parsedResponse = {
+							ingredients: [
+								{
+									name: "mixed ingredients",
+									quantity: "various amounts",
+									confidence: 0.5,
+								},
+							],
+						};
+					}
 
-          // Send final response
-          const finalData = JSON.stringify({
-            step: "Complete",
-            progress: 100,
-            ingredients: parsedResponse.ingredients,
-            done: true,
-          })
-          controller.enqueue(encoder.encode(`data: ${finalData}\n\n`))
-          controller.close()
-        } catch (error) {
-          console.error("Error in ingredient detection:", error)
-          const errorData = JSON.stringify({
-            step: "Error",
-            progress: 100,
-            error: "Failed to process image",
-            done: true,
-          })
-          controller.enqueue(encoder.encode(`data: ${errorData}\n\n`))
-          controller.close()
-        }
-      }
+					// Send final response
+					const finalData = JSON.stringify({
+						step: "Complete",
+						progress: 100,
+						ingredients: parsedResponse.ingredients,
+						done: true,
+					});
+					controller.enqueue(
+						encoder.encode(`data: ${finalData}\n\n`)
+					);
+					controller.close();
+				} catch (error) {
+					console.error("Error in ingredient detection:", error);
+					const errorData = JSON.stringify({
+						step: "Error",
+						progress: 100,
+						error: "Failed to process image",
+						done: true,
+					});
+					controller.enqueue(
+						encoder.encode(`data: ${errorData}\n\n`)
+					);
+					controller.close();
+				}
+			};
 
-      processImage()
-    },
-  })
+			processImage();
+		},
+	});
 
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-    },
-  })
+	return new Response(stream, {
+		headers: {
+			"Content-Type": "text/event-stream",
+			"Cache-Control": "no-cache",
+			Connection: "keep-alive",
+		},
+	});
 }

@@ -43,6 +43,7 @@ export class Mem0Service {
 		try {
 			// Save to localStorage if in browser environment
 			if (isBrowser) {
+				console.log()
 				this.savePreferencesToLocalStorage(userId, preferences);
 			}
 
@@ -250,7 +251,7 @@ export class Mem0Service {
 		preferences: Partial<UserPreferences>
 	): void {
 		if (!isBrowser) return;
-
+		console.log("Saving preferences to localStorage for user:", userId);
 		try {
 			// Get existing preferences
 			const allPreferences =

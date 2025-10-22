@@ -1,44 +1,52 @@
-import { type NextRequest, NextResponse } from "next/server"
-import { auth } from "@clerk/nextjs/server"
-import { GoogleGenerativeAI } from "@google/generative-ai"
-import { RecipeService } from "@/lib/recipe-service"
-import { v4 as uuidv4 } from "uuid"
+import { type NextRequest, NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import { RecipeService } from "@/lib/recipe-service";
+import { v4 as uuidv4 } from "uuid";
 
 // Initialize Gemini AI
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!)
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
 interface DetectedIngredient {
-  name: string
-  quantity: string
-  confidence: number
+	name: string;
+	quantity: string;
+	confidence: number;
 }
 
 export async function POST(request: NextRequest) {
-  try {
-    // Check authentication
-    const { userId } = await auth()
-    if (!userId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
+	try {
+		// Check authentication
+		const { userId } = await auth();
+		if (!userId) {
+			return NextResponse.json(
+				{ error: "Unauthorized" },
+				{ status: 401 }
+			);
+		}
 
-    const { ingredients } = await request.json()
+		const { ingredients } = await request.json();
 
-    if (!ingredients || !Array.isArray(ingredients)) {
-      return NextResponse.json({ error: "No ingredients provided" }, { status: 400 })
-    }
+		if (!ingredients || !Array.isArray(ingredients)) {
+			return NextResponse.json(
+				{ error: "No ingredients provided" },
+				{ status: 400 }
+			);
+		}
 
-    // Get current time for meal context
-    const now = new Date()
-    const currentHour = now.getHours()
-    let mealType = "snack"
-    if (currentHour >= 6 && currentHour < 11) mealType = "breakfast"
-    else if (currentHour >= 11 && currentHour < 16) mealType = "lunch"
-    else if (currentHour >= 16 && currentHour < 22) mealType = "dinner"
+		// Get current time for meal context
+		const now = new Date();
+		const currentHour = now.getHours();
+		let mealType = "snack";
+		if (currentHour >= 6 && currentHour < 11) mealType = "breakfast";
+		else if (currentHour >= 11 && currentHour < 16) mealType = "lunch";
+		else if (currentHour >= 16 && currentHour < 22) mealType = "dinner";
 
-    // Prepare comprehensive prompt for recipe generation
-    const ingredientsList = ingredients.map((ing: DetectedIngredient) => `${ing.name} (${ing.quantity})`).join(", ")
+		// Prepare comprehensive prompt for recipe generation
+		const ingredientsList = ingredients
+			.map((ing: DetectedIngredient) => `${ing.name} (${ing.quantity})`)
+			.join(", ");
 
-    const prompt = `
+		const prompt = `
 You are an expert chef and recipe creator. Based on the detected ingredients and current context, suggest recipes that can be made.
 
 Available Ingredients: ${ingredientsList}
@@ -107,77 +115,87 @@ Guidelines:
 - Consider ingredient quantities and don't suggest recipes requiring much more than what's available
 
 Return only the JSON response, no additional text.
-`
+`;
 
-    // Call Gemini API
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" })
-    const result = await model.generateContent(prompt)
-    const response = await result.response
-    const text = response.text()
+		// Call Gemini API
+		const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+		const result = await model.generateContent(prompt);
+		const response = await result.response;
+		const text = response.text();
 
-    // Parse JSON response
-    let parsedResponse
-    try {
-      // Clean the response text to extract JSON
-      const jsonMatch = text.match(/\{[\s\S]*\}/)
-      if (jsonMatch) {
-        parsedResponse = JSON.parse(jsonMatch[0])
-      } else {
-        throw new Error("No JSON found in response")
-      }
-    } catch (parseError) {
-      console.error("Error parsing Gemini response:", parseError)
-      console.error("Raw response:", text)
+		// Parse JSON response
+		let parsedResponse;
+		try {
+			// Clean the response text to extract JSON
+			const jsonMatch = text.match(/\{[\s\S]*\}/);
+			if (jsonMatch) {
+				parsedResponse = JSON.parse(jsonMatch[0]);
+			} else {
+				throw new Error("No JSON found in response");
+			}
+		} catch (parseError) {
+			console.error("Error parsing Gemini response:", parseError);
+			console.error("Raw response:", text);
 
-      // Fallback response
-      parsedResponse = {
-        basicRecipes: [
-          {
-            name: "Simple Stir Fry",
-            description: "Quick and easy stir fry with available ingredients",
-            cookingTime: "15 minutes",
-            difficulty: "Beginner",
-            servings: 2,
-            ingredients: ingredients.map((ing: DetectedIngredient) => ({
-              item: ing.name,
-              amount: ing.quantity,
-              available: true,
-            })),
-            equipment: ["Pan", "Stove"],
-            steps: [
-              "Heat oil in a pan over medium heat",
-              "Add ingredients and stir fry for 10-12 minutes",
-              "Season with salt and pepper to taste",
-              "Serve hot",
-            ],
-            tips: ["Keep ingredients moving in the pan for even cooking"],
-            nutritionHighlights: ["Fresh vegetables provide vitamins and fiber"],
-          },
-        ],
-        advancedRecipes: [],
-      }
-    }
+			// Fallback response
+			parsedResponse = {
+				basicRecipes: [
+					{
+						name: "Simple Stir Fry",
+						description:
+							"Quick and easy stir fry with available ingredients",
+						cookingTime: "15 minutes",
+						difficulty: "Beginner",
+						servings: 2,
+						ingredients: ingredients.map(
+							(ing: DetectedIngredient) => ({
+								item: ing.name,
+								amount: ing.quantity,
+								available: true,
+							})
+						),
+						equipment: ["Pan", "Stove"],
+						steps: [
+							"Heat oil in a pan over medium heat",
+							"Add ingredients and stir fry for 10-12 minutes",
+							"Season with salt and pepper to taste",
+							"Serve hot",
+						],
+						tips: [
+							"Keep ingredients moving in the pan for even cooking",
+						],
+						nutritionHighlights: [
+							"Fresh vegetables provide vitamins and fiber",
+						],
+					},
+				],
+				advancedRecipes: [],
+			};
+		}
 
-    try {
-      const sessionId = uuidv4()
-      await RecipeService.storeRecipeSession(
-        userId,
-        sessionId,
-        ingredients,
-        parsedResponse.basicRecipes || [],
-        parsedResponse.advancedRecipes || [],
-      )
+		try {
+			const sessionId = uuidv4();
+			await RecipeService.storeRecipeSession(
+				userId,
+				sessionId,
+				ingredients,
+				parsedResponse.basicRecipes || [],
+				parsedResponse.advancedRecipes || []
+			);
 
-      // Add sessionId to response for future reference
-      parsedResponse.sessionId = sessionId
-    } catch (dbError) {
-      console.error("Error storing recipes in database:", dbError)
-      // Continue with response even if storage fails
-    }
+			// Add sessionId to response for future reference
+			parsedResponse.sessionId = sessionId;
+		} catch (dbError) {
+			console.error("Error storing recipes in database:", dbError);
+			// Continue with response even if storage fails
+		}
 
-    return NextResponse.json(parsedResponse)
-  } catch (error) {
-    console.error("Error in generate-recipes API:", error)
-    return NextResponse.json({ error: "Failed to generate recipes" }, { status: 500 })
-  }
+		return NextResponse.json(parsedResponse);
+	} catch (error) {
+		console.error("Error in generate-recipes API:", error);
+		return NextResponse.json(
+			{ error: "Failed to generate recipes" },
+			{ status: 500 }
+		);
+	}
 }
